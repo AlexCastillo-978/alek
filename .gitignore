@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────
+#  Alek — .gitignore
+#  Evita subir secretos, entornos y artefactos generados.
+# ─────────────────────────────────────────────────────────────
+
+# Secretos y configuración local
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+
+# Base de datos local (contiene datos de clientes/informes)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs e informes exportados
+*.log
+informes_exportados/
+exports/
+
+# IDE / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
