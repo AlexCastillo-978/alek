@@ -97,7 +97,7 @@ Error: {shodan.get('error') or 'Ninguno'}
 === FILTRACIONES ===
 Total: {filtraciones.get('total', 0)}
 Nivel: {filtraciones.get('nivel_riesgo', 'DESCONOCIDO')}
-Top 5 más críticos: {json.dumps(sorted(cves.get('cves', []), key=lambda c: c.get('cvss', 0), reverse=True)[:5], ensure_ascii=False)}
+Detalle: {json.dumps(filtraciones.get('filtraciones', []), ensure_ascii=False)}
 Error: {filtraciones.get('error') or 'Ninguno'}
 
 Genera el análisis en el formato JSON especificado.
@@ -138,7 +138,7 @@ CVEs recientes del servidor:
   Total: {cves.get('total', 0)} en últimos 90 días
   Críticos (CVSS >= 9.0): {cves.get('criticos', 0)}
   Altos (CVSS >= 7.0): {cves.get('altos', 0)}
-  Detalle: {json.dumps(cves.get('cves', []), ensure_ascii=False)}
+Top 5 más críticos: {json.dumps(sorted(cves.get('cves', []), key=lambda x: x.get('cvss', 0), reverse=True)[:5], ensure_ascii=False)}
 
 Incluye los hallazgos de inteligencia de amenazas en tu análisis.
 Si la IP es maliciosa o hay CVEs críticos, añádelos como hallazgos
