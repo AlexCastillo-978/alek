@@ -19,7 +19,7 @@ load_dotenv()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 MODELO     = "claude-sonnet-4-6"
-MAX_TOKENS = 3500  # Subido de 1500 — evita informes truncados
+MAX_TOKENS = 8000  # Subido de 1500 — evita informes truncados
 
 
 def generar_informe(dominio: str, datos_recon: dict, verbose: bool = True) -> dict:

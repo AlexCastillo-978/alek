@@ -97,7 +97,7 @@ Error: {shodan.get('error') or 'Ninguno'}
 === FILTRACIONES ===
 Total: {filtraciones.get('total', 0)}
 Nivel: {filtraciones.get('nivel_riesgo', 'DESCONOCIDO')}
-Detalle: {json.dumps(filtraciones.get('filtraciones', []), ensure_ascii=False)}
+Top 5 más críticos: {json.dumps(sorted(cves.get('cves', []), key=lambda c: c.get('cvss', 0), reverse=True)[:5], ensure_ascii=False)}
 Error: {filtraciones.get('error') or 'Ninguno'}
 
 Genera el análisis en el formato JSON especificado.
