@@ -212,7 +212,7 @@ def gauge(puntuacion: int, nivel: str) -> go.Figure:
 
 def bars_cabeceras(presentes, ausentes) -> go.Figure:
     items  = [(c["alias"],1,SEV_COLORS["BAJO"],"Configurada") for c in presentes] + \
-             [(c["alias"],0,SEV_COLORS["CRITICO"],"Ausente")  for c in ausentes]
+             [(c["alias"],1,SEV_COLORS["CRITICO"],"Ausente")  for c in ausentes]
     fig = go.Figure(go.Bar(
         x=[i[1] for i in items], y=[i[0] for i in items],
         orientation="h", marker_color=[i[2] for i in items],
