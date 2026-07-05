@@ -84,18 +84,34 @@ def analizar_headers(dominio: str) -> dict:
     for protocolo in ["https", "http"]:
         url = f"{protocolo}://{dominio}"
         try:
-            # Usamos HEAD en vez de GET: solo pedimos las cabeceras,
-            # no el contenido de la página. Es más rápido y ligero.
+            # Usamos GET con stream=True en vez de HEAD.
+            #
+            # BUG CORREGIDO: muchos servidores, CDNs y WAF (Cloudflare,
+            # balanceadores, frameworks con middleware de seguridad...)
+            # solo añaden las cabeceras de seguridad en respuestas GET,
+            # y devuelven HEAD con un juego de cabeceras incompleto o
+            # directamente rechazan el método. Esto hacía que el widget
+            # de "Cabeceras HTTP" apareciera vacío o mostrara casi todas
+            # las cabeceras como "ausentes" aunque sí estuvieran configuradas.
+            # Con stream=True no descargamos el cuerpo de la página: leemos
+            # las cabeceras y cerramos la conexión inmediatamente, así que
+            # seguimos siendo ligeros y rápidos como con HEAD.
             # allow_redirects=True seguimos redirecciones (ej: http → https)
-            respuesta = requests.head(
+            respuesta = requests.get(
                 url,
                 timeout=REQUEST_TIMEOUT,
                 headers={"User-Agent": USER_AGENT},
                 allow_redirects=True,
-                verify=True  # verificamos el certificado SSL
+                verify=True,  # verificamos el certificado SSL
+                stream=True   # no descargamos el cuerpo, solo cabeceras
             )
 
             cabeceras_respuesta = respuesta.headers
+
+            # Cerramos la conexión ya: con stream=True el cuerpo de la
+            # página no se ha descargado todavía, así que esto libera el
+            # socket sin gastar ancho de banda ni tiempo de más.
+            respuesta.close()
 
             presentes = []
             ausentes = []
@@ -149,6 +165,11 @@ def analizar_headers(dominio: str) -> dict:
                 "servidor": "Desconocido",
                 "error": f"Timeout: el servidor no respondió en {REQUEST_TIMEOUT}s"
             }
+        except requests.exceptions.RequestException:
+            # Cualquier otro fallo de red (demasiadas redirecciones,
+            # respuesta mal formada, etc.) — probamos el otro protocolo
+            # en vez de dejar el widget completamente vacío.
+            continue
 
     # Si llegamos aquí, ningún protocolo funcionó
     return {

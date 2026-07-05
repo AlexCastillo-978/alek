@@ -6,7 +6,7 @@ Como ejecutarlo:
   streamlit run dashboard/app.py
 """
 
-import sys, os, json, hmac, base64
+import sys, os, json, hmac, base64, csv, io, unicodedata
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
@@ -120,7 +120,7 @@ def render_login():
         <p style="font-size:1.75rem;font-weight:700;color:{COLOR_ACCENT};
            letter-spacing:.1em;margin:0">ALEK</p>
         <p style="font-size:.85rem;color:{COLOR_MUTED};margin:.4rem 0 0">
-           Inteligencia de superficie de ataque</p>
+           OSINT y escaneo de superficie de ataque</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -146,6 +146,9 @@ def render_login():
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 
+if "filtro_severidad" not in st.session_state:
+    st.session_state["filtro_severidad"] = None
+
 if not st.session_state["autenticado"]:
     render_login()
     st.stop()
@@ -157,13 +160,31 @@ from threat_intel.analyzer import ejecutar_analisis_tip
 
 # Helpers
 
+def normalizar_severidad(valor: str) -> str:
+    """
+    Normaliza cualquier variante de severidad ("CRÍTICO", "crítico",
+    "Critico"...) a la clave interna que usa el dashboard: CRITICO,
+    ALTO, MEDIO, BAJO o INFORMATIVO (siempre sin tilde y en mayúsculas).
+
+    Bug corregido: la IA devuelve "CRÍTICO" (con tilde), pero SEV_COLORS
+    y el resto del dashboard usaban "CRITICO" (sin tilde). Al no coincidir,
+    los hallazgos críticos nunca se contaban en el donut de severidad ni
+    recibían su color/estilo correcto en las tarjetas de hallazgo.
+    """
+    if not valor:
+        return "BAJO"
+    sin_tildes = unicodedata.normalize("NFKD", valor).encode("ascii", "ignore").decode("ascii")
+    return sin_tildes.strip().upper()
+
 def color_nivel(nivel: str) -> str:
-    return SEV_COLORS.get(nivel.upper(), COLOR_MUTED)
+    return SEV_COLORS.get(normalizar_severidad(nivel), COLOR_MUTED)
 
 def color_puntuacion(p: int) -> str:
+    # Bandas alineadas con calcular_riesgo_global() en recon/runner.py
+    # (antes 60-79 se pintaba como "ALTO" cuando el nivel real es "MEDIO").
     if p >= 80: return SEV_COLORS["BAJO"]
-    if p >= 60: return SEV_COLORS["ALTO"]
-    if p >= 40: return SEV_COLORS["MEDIO"]
+    if p >= 60: return SEV_COLORS["MEDIO"]
+    if p >= 40: return SEV_COLORS["ALTO"]
     return SEV_COLORS["CRITICO"]
 
 def gauge(puntuacion: int, nivel: str) -> go.Figure:
@@ -211,7 +232,7 @@ def bars_cabeceras(presentes, ausentes) -> go.Figure:
 def donut_severidades(hallazgos: list) -> go.Figure:
     conteo = {"CRITICO":0,"ALTO":0,"MEDIO":0,"BAJO":0,"INFORMATIVO":0}
     for h in hallazgos:
-        sev = h.get("severidad","BAJO").upper()
+        sev = normalizar_severidad(h.get("severidad","BAJO"))
         if sev in conteo: conteo[sev] += 1
     labels = [k for k,v in conteo.items() if v > 0]
     values = [conteo[k] for k in labels]
@@ -220,6 +241,9 @@ def donut_severidades(hallazgos: list) -> go.Figure:
         marker_colors=[color_nivel(k) for k in labels],
         textinfo="label+value",
         textfont={"size":12,"color":COLOR_TEXT},
+        # customdata lleva la clave de severidad "limpia" para poder
+        # filtrar los hallazgos al hacer click en una porción del donut.
+        customdata=labels,
     ))
     fig.update_layout(
         paper_bgcolor=COLOR_BG_PANEL, plot_bgcolor=COLOR_BG_PANEL,
@@ -228,11 +252,12 @@ def donut_severidades(hallazgos: list) -> go.Figure:
     return fig
 
 def render_hallazgo(h: dict):
-    sev = h.get("severidad","BAJO").upper()
+    sev_mostrada = h.get("severidad","BAJO").upper()
+    sev = normalizar_severidad(sev_mostrada)
     st.markdown(f"""
     <div class="finding-card sev-{sev}">
         <div class="finding-title">
-            <span class="badge badge-{sev}">{sev}</span>&nbsp;&nbsp;{h.get('titulo','')}
+            <span class="badge badge-{sev}">{sev_mostrada}</span>&nbsp;&nbsp;{h.get('titulo','')}
         </div>
         <div class="finding-section"><strong>Que es:</strong> {h.get('que_es','')}</div>
         <div class="finding-section"><strong>Riesgo:</strong> {h.get('riesgo','')}</div>
@@ -319,7 +344,7 @@ with header_cols[0]:
         {logo_img_header}
         <div>
             <p class="header-title">ALEK</p>
-            <p class="header-sub">Inteligencia de superficie de ataque · Analisis automatizado asistido por IA</p>
+            <p class="header-sub">OSINT y escaneo de superficie de ataque · Analisis automatizado asistido por IA</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -345,6 +370,9 @@ if analizar and dominio_input:
     ti = {}
     resultado = {}
     error_fatal = None
+    # Al lanzar un nuevo análisis, limpiamos cualquier filtro de severidad
+    # que hubiera quedado activo del análisis anterior.
+    st.session_state["filtro_severidad"] = None
 
     with st.status(f"Analizando {dominio}...", expanded=True) as status:
         try:
@@ -443,13 +471,41 @@ if "datos" in st.session_state:
         if presentes or ausentes:
             st.plotly_chart(bars_cabeceras(presentes,ausentes),
                             use_container_width=True, config={"displayModeBar":False})
+        elif headers.get("error"):
+            st.caption(f"Sin datos de cabeceras ({headers['error']})")
         else:
             st.caption("Sin datos de cabeceras")
     with g3:
         st.markdown("**Hallazgos por severidad**")
         if hallazgos:
-            st.plotly_chart(donut_severidades(hallazgos),
-                            use_container_width=True, config={"displayModeBar":False})
+            evento_donut = st.plotly_chart(
+                donut_severidades(hallazgos),
+                use_container_width=True,
+                config={"displayModeBar": False},
+                on_select="rerun",
+                selection_mode="points",
+                key="donut_severidad",
+            )
+            puntos_sel = (evento_donut.get("selection", {}) or {}).get("points", [])
+            if puntos_sel:
+                severidad_click = puntos_sel[0].get("customdata")
+                if isinstance(severidad_click, (list, tuple)):
+                    severidad_click = severidad_click[0] if severidad_click else None
+                if not severidad_click:
+                    severidad_click = puntos_sel[0].get("label")
+                if severidad_click:
+                    st.session_state["filtro_severidad"] = normalizar_severidad(severidad_click)
+            if st.session_state.get("filtro_severidad"):
+                fc1, fc2 = st.columns([3, 1])
+                with fc1:
+                    st.caption(
+                        f"Filtrando hallazgos: **{st.session_state['filtro_severidad']}** "
+                        "(click de nuevo en el donut o pulsa el boton para ver todos)"
+                    )
+                with fc2:
+                    if st.button("Ver todos", key="quitar_filtro_severidad", use_container_width=True):
+                        st.session_state["filtro_severidad"] = None
+                        st.rerun()
         else:
             st.caption("Sin hallazgos")
 
@@ -458,9 +514,16 @@ if "datos" in st.session_state:
     col_hall, col_info = st.columns([3,2])
     with col_hall:
         st.markdown("**Hallazgos detectados**")
-        if hallazgos:
-            for h in hallazgos:
+        filtro_sev = st.session_state.get("filtro_severidad")
+        hallazgos_mostrados = (
+            [h for h in hallazgos if normalizar_severidad(h.get("severidad","BAJO")) == filtro_sev]
+            if filtro_sev else hallazgos
+        )
+        if hallazgos_mostrados:
+            for h in hallazgos_mostrados:
                 render_hallazgo(h)
+        elif filtro_sev:
+            st.info(f"No hay hallazgos de severidad {filtro_sev}.")
         else:
             st.success("No se detectaron hallazgos.")
 
@@ -535,23 +598,33 @@ if "datos" in st.session_state:
                            file_name=f"alek_{dominio.replace('.','_')}.json",
                            mime="application/json", use_container_width=True)
     with e2:
-        lineas = [f"INFORME ALEK — {dominio.upper()}", "="*55, "",
-                  f"Puntuacion: {puntuacion}/100 — {nivel}",
-                  f"\nResumen: {resumen}\n",
-                  "HALLAZGOS", "-"*40]
+        # Informe en CSV en vez de .txt — a peticion de un usuario experimentado,
+        # para poder abrirlo y filtrarlo directamente en Excel/Sheets.
+        buffer_csv = io.StringIO()
+        escritor = csv.writer(buffer_csv)
+        escritor.writerow(["Seccion", "Severidad", "Titulo", "Detalle"])
+        escritor.writerow(["Resumen", nivel, "Puntuacion global", f"{puntuacion}/100"])
+        if resumen:
+            escritor.writerow(["Resumen", "", "Resumen ejecutivo", resumen])
         for h in hallazgos:
-            lineas += [f"\n[{h['severidad']}] {h['titulo']}",
-                       f"Que es: {h['que_es']}",
-                       f"Riesgo: {h['riesgo']}",
-                       f"Solucion: {h['solucion']}"]
+            detalle = (
+                f"Que es: {h.get('que_es','')} | "
+                f"Riesgo: {h.get('riesgo','')} | "
+                f"Solucion: {h.get('solucion','')}"
+            )
+            escritor.writerow(["Hallazgo", h.get("severidad",""), h.get("titulo",""), detalle])
         if ti.get("resumen"):
-            lineas += ["", "INTELIGENCIA DE AMENAZAS", "-"*40, ti["resumen"]]
-        for i,r in enumerate(recs,1):
-            lineas.append(f"{i}. {r}")
-        st.download_button("Descargar informe .txt",
-                           data="\n".join(lineas),
-                           file_name=f"informe_{dominio.replace('.','_')}.txt",
-                           mime="text/plain", use_container_width=True)
+            escritor.writerow(["Inteligencia de amenazas", ti.get("nivel_amenaza",""),
+                               "Resumen", ti["resumen"]])
+        for i, rec in enumerate(recs, 1):
+            escritor.writerow(["Recomendacion", "", f"Accion {i}", rec])
+        for i, paso in enumerate(pasos, 1):
+            escritor.writerow(["Proximo paso", "", f"Paso {i}", paso])
+
+        st.download_button("Descargar informe .csv",
+                           data=buffer_csv.getvalue(),
+                           file_name=f"informe_{dominio.replace('.','_')}.csv",
+                           mime="text/csv", use_container_width=True)
 
 else:
     logo_espera = ""

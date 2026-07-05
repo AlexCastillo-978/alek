@@ -14,6 +14,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import json
 from datetime import datetime
 from recon.runner          import ejecutar_recon
 from threat_intel.analyzer import ejecutar_analisis_tip
@@ -69,7 +70,20 @@ def analizar_cliente(cliente: dict, forzar_email: bool = False):
             cambios["puntuacion_anterior"]     = anterior["puntuacion"]
 
         subs_actuales   = set(datos.get("subdominios", {}).get("sensibles", []))
+        # BUG CORREGIDO: subs_anteriores estaba fijado a un set() vacío,
+        # así que TODOS los subdominios sensibles se marcaban como
+        # "nuevos" en cada ejecución, aunque ya se conocieran de análisis
+        # previos. Ahora los recuperamos del histórico guardado en BD.
         subs_anteriores = set()
+        datos_anteriores_json = anterior.get("datos_json") if anterior else None
+        if datos_anteriores_json:
+            try:
+                datos_anteriores = json.loads(datos_anteriores_json)
+                subs_anteriores = set(
+                    datos_anteriores.get("subdominios", {}).get("sensibles", [])
+                )
+            except (json.JSONDecodeError, TypeError):
+                subs_anteriores = set()
         nuevos_subs = subs_actuales - subs_anteriores
         if nuevos_subs:
             cambios["nuevos_subdominios"] = list(nuevos_subs)
